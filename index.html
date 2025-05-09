@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Balls in a Rotating Ring</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #222;
+            margin: 0;
+        }
+        .ring {
+            position: relative;
+            width: 300px;
+            height: 300px;
+            border: 10px solid white;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .middle-ring {
+            position: absolute;
+            width: 200px;
+            height: 200px;
+            border: 3px dashed red;
+            border-radius: 50%;
+            animation: rotate 5s linear infinite;
+        }
+        .ball {
+            position: absolute;
+            width: 30px;
+            height: 30px;
+            background-color: #fefde5;
+            border-radius: 50%;
+        }
+        @keyframes rotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    ''''''" "
+    <div>
+        <p>hi , hello pavithra ddddd</p>
+    </div>
+    <div class="ring">
+        <div class="middle-ring">
+            <div class="ball" id="ball1"></div>
+            <div class="ball" id="ball2"></div>
+            <div class="ball" id="ball3"></div>
+            <div class="ball" id="ball4"></div>
+            <div class="ball" id="ball5"></div>
+            <div class="ball" id="ball6"></div>
+        </div>
+    </div>
+    <script>
+        function positionBalls() {
+            const balls = document.querySelectorAll('.ball');
+            const radius = 80;
+            const centerX = 100;
+            const centerY = 100;
+            balls.forEach((ball, index) => {
+                const angle = (index / balls.length) * (2 * Math.PI);
+                const x = centerX + radius * Math.cos(angle) - 15;
+                const y = centerY + radius * Math.sin(angle) - 15;
+                ball.style.transform = `translate(${x}px, ${y}px)`;
+            });
+        }
+        positionBalls();
+    </script>
+</body>
+</html>
