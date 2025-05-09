@@ -1,78 +1,2704 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Balls in a Rotating Ring</title>
-    <style>
-        body {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            background-color: #222;
-            margin: 0;
+var isExpert = false;
+var isApprover = false;
+var isSupervisor = false;
+var isRegionalResourceOwner = false;
+var isSiteAdmin = false;
+var isAuthorizedMember = false;
+var isExpertApproverMember = false;
+var isP04Member = false;
+var status = "Draft";
+var initialStatus = "";
+var siteUrl = "";
+var requirementCatalogListName = "Requirement Catalog";
+var expertListName = "ExpertMaster";
+var qualificationListName = "Qualifications";
+var errorValidation =
+  " Please check if all mandatory fields are filled. Validation failed";
+var requestId = "";
+var expertKey = 0;
+var supervisorKey = 0;
+var approverKey = 0;
+var regionalOwnerKey = 0;
+var expertPickerKey = "";
+var currentUserId = "";
+var isQualificationVisible = "";
+var NoFurtherActionMessage =
+  "Approval or Rejection workflow is complete. A notification was sent to the expert. No further action is required.";
+var disabledSelctionRequirement =
+  "This item is already linked to expert, hence it is not available for selection.";
+var UnexpectedErrorMessage =
+  "One or more error occured in to qualification add/update. Please contact administrator";
+var SupervisorMessage =
+  "Item can not be edited, only active status of Expert and expiry date of the qualification can be changed.";
+var totalQualificationItems = 0;
+var totalItemsToUpdate = 0;
+var totalItemsUpdated = 0;
+var totalItemsUpdateFailed = 0;
+var totalItemsToAppend = 0;
+var totalItemsAppended = 0;
+var totalItemsAppendFailed = 0;
+var saveStatus = false;
+var isLanguageSaved = false;
+var isSpecialSkills = false;
+
+$(document).ready(function () {
+  toggleLoader(true);
+  $("span.mdmdatacol").each(function () {
+    if ($(this).children().length == 0) {
+      //get the display name from the custom layout
+      displayName = $(this).attr("data-displayName");
+
+      var duplicateElements = $(
+        'span.mdmdatacol[data-displayName="' + displayName + '"]'
+      );
+      //console.log(displayName + " : " + duplicateElements.length);
+
+      var controlTag = $("table.ms-formtable td").filter(function () {
+        return this.innerHTML.indexOf('FieldName="' + displayName + '"') != -1;
+      });
+      //console.log("control : " + $(controlTag).innerHTML);
+      $.each(duplicateElements, function () {
+        $(controlTag).contents().appendTo($(this));
+      });
+    }
+  });
+
+  if (
+    _spPageContextInfo.webServerRelativeUrl != undefined &&
+    _spPageContextInfo.webServerRelativeUrl != ""
+  )
+    siteUrl = _spPageContextInfo.webServerRelativeUrl;
+  status = $(".status :selected").val();
+  $(".status")
+    .find("select[id^='Status_']")
+    .change(function () {
+      setStatusActions();
+    });
+    
+    $(".isactive select").change(function () {
+		enableDisableIsActive();    
+	});
+	enableDisableIsActive();
+
+  hideOriginalForm();
+
+  $(document).on("keyup", function (e) {
+    if (e.key == "Escape") closePopup();
+  });
+  SP.SOD.executeFunc(
+    "clientpeoplepicker.js",
+    "SPClientPeoplePicker",
+    function () {
+      getCurrentUser();
+    }
+  );
+});
+
+function enableDisableIsActive()
+{
+  //console.log(isSupervisor);
+  //console.log(isSiteAdmin);
+
+  if(isSupervisor || isSiteAdmin) {
+    $(".isactive select").prop("disabled", false);
+    $(".isactive select").attr('disabled', false); 
+
+    if($('.isactive select option:selected').text() == "No") {
+      $(".activeuntil select").prop("disabled", false);
+      $(".activeuntil select").attr('disabled', false);   
+    }
+    else {
+      $(".activeuntil select").prop("disabled", true);
+      $(".activeuntil select").attr('disabled', true);   
+    }
+  }
+  else {
+    $(".isactive select").prop("disabled", true);
+    $(".isactive select").attr('disabled', true);  
+    $(".activeuntil select").prop("disabled", true);
+    $(".activeuntil select").attr('disabled', true);
+  }
+}
+
+function openSelectionPopup(item) {
+  callbackInput = $(item).parent().parent().find("input.form-control");
+  var controlPosition = $(item).position();
+  $(".popup-overlay").css({
+    top: "51%",
+    left: "50%",
+    position: "fixed",
+    transform: "translate(-50%,-50%)",
+    "z-index": 1001,
+  });
+  $(".popup-overlay").show();
+  $(".headerContainer").addClass("blurred");
+  $(".bodyContainer").addClass("blurred");
+  $(".footerContainer").addClass("blurred");
+  $(".ms-core-overlay").css("overflow", "hidden");
+
+  $(".targetClose").on("click", function () {
+    closePopup();
+  });
+  $(".targetAdd").on("click", function () {
+    addSelectedQualification();
+  });
+}
+
+function fillRequirement() {
+  var ObjectTitle = $('span.mdmdatacol[data-displayName="Object Group"]')
+    .find('input[type="hidden"]')
+    .val()
+    .split("|")[0];
+  var ObjectId = $('span.mdmdatacol[data-displayName="Object Group"]')
+    .find('input[type="hidden"]')
+    .val()
+    .split("|")[1];
+
+  var Activity = $('span.mdmdatacol[data-displayName="Activity"]')
+    .find('input[type="hidden"]')
+    .val()
+    .split("|")[0];
+  var ActivityId = $('span.mdmdatacol[data-displayName="Activity"]')
+    .find('input[type="hidden"]')
+    .val()
+    .split("|")[1];
+  if (
+    (ObjectTitle != null || Activity != null) &&
+    (ObjectTitle != "" || Activity != "")
+  )
+    getRequirement(ObjectTitle, Activity);
+  else
+    $(".popup-datatable").html(
+      "<div class='reqErrMessage'>Please input either object or activity to get requirement.</div>"
+    );
+}
+
+function getRequirement(objectName, activity) {
+  try {
+    var context = new SP.ClientContext(siteUrl);
+    var requirementList = context
+      .get_web()
+      .get_lists()
+      .getByTitle(requirementCatalogListName);
+    var context = new SP.ClientContext(siteUrl);
+    var requirementList = context
+      .get_web()
+      .get_lists()
+      .getByTitle(requirementCatalogListName);
+    var queryXml = "<View><Query><Where>";
+
+    if (objectName != null && activity != null) {
+      queryXml +=
+        "<And><Or><Eq><FieldRef Name='Object' /><Value Type='TaxonomyFieldType'>" +
+        objectName +
+        "</Value></Eq><Eq><FieldRef Name='Activity' /> <Value Type='TaxonomyFieldType'>" +
+        activity +
+        "</Value></Eq></Or><Eq><FieldRef Name='LifeCycleState' /><Value Type='Choice'>Released</Value></Eq></And>";
+    } else if (objectName != null && activity == null) {
+      queryXml +=
+        "<And><Eq><FieldRef Name='Object' /><Value Type='TaxonomyFieldType'>" +
+        objectName +
+        "</Value></Eq><Eq><FieldRef Name='LifeCycleState' /><Value Type='Choice'>Released</Value></Eq></And>";
+    } else if (objectName == null && activity != null) {
+      queryXml +=
+        "<And><Eq><FieldRef Name='Activity' /><Value Type='TaxonomyFieldType'>" +
+        activity +
+        "</Value></Eq><Eq><FieldRef Name='LifeCycleState' /><Value Type='Choice'>Released</Value></Eq></And>";
+    }
+
+    //V1.2
+    queryXml +=
+      "</Where></Query> <ViewFields><FieldRef Name='Object' /><FieldRef Name='ID' />" +
+      "<FieldRef Name='Title' /> <FieldRef Name='Taxonomy'  /> <FieldRef Name='Standard'  /> " +
+      "<FieldRef Name='Zone'  /> <FieldRef Name='Header'  /><FieldRef Name='Reference'  /><FieldRef Name='Activity'  /> " +
+      "</ViewFields></View>";
+    var query = new SP.CamlQuery();
+    query.set_viewXml(queryXml);
+    var items = requirementList.getItems(query);
+    context.load(items);
+    context.executeQueryAsync(
+      function () {
+        if (items != null && items.get_count() > 0) {
+          createDatatable(items);
+        } else
+          $(".popup-datatable").html(
+            "<div class='reqErrMessage'>No requirement found for given input as object or activity.</div>"
+          );
+      },
+      function (sender, args) {
+        // onError
+        console.log(args.get_message());
+      }
+    );
+  } catch (error) {
+    console.error(
+      "Error while getting items from Requirement Catalog. Error : " + error
+    );
+  } finally {
+  }
+}
+
+function createDatatable(data) {
+  try {
+    var arrColumns = [
+      "Standard",
+      "Type",
+      "Object Group / <span class='alternateColor1'>Activity<span>",
+      "Zone",
+      "Header",
+      "Reference",
+    ];
+    var table =
+      '<table id="requirementdata" class="requirementdata nowrap dataTable">';
+    table += "<thead>";
+    table += "<tr>";
+    //table += '<th class="customheader"><input type="checkbox" id="selectAll" name="selectAll" /></th>';
+    table += '<th class="customheader"></th>';
+    arrColumns.forEach(function (colName) {
+      table += '<th class="customheader">' + colName + "</th>";
+    });
+    table += "</tr>";
+    table += "</thead>";
+    table += "<tbody>";
+
+    var listEnumerator = data.getEnumerator();
+    while (listEnumerator.moveNext()) {
+      var isAlreadyAvailable = false;
+      var currentObject = listEnumerator.get_current();
+      var requirementTitle = currentObject.get_item("Title");
+      var requirementStandard = currentObject.get_item("Standard");
+      var requirementObject = currentObject.get_item("Object");
+      var requirementId = currentObject.get_item("ID");
+      //V1.2
+      var requirementActivity = currentObject.get_item("Activity");
+
+      $.each($("#qualificationdata tr"), function (index, tr) {
+        if (index > 0) {
+          if ($(this).find(".uniqueContainer")[0].innerText == requirementId) {
+            isAlreadyAvailable = true;
+            //break;
+          }
         }
-        .ring {
-            position: relative;
-            width: 300px;
-            height: 300px;
-            border: 10px solid white;
-            border-radius: 50%;
-            display: flex;
-            justify-content: center;
-            align-items: center;
+      });
+
+      if (isAlreadyAvailable)
+        table +=
+          '<tr class="requirementRowDisabled" title="' +
+          disabledSelctionRequirement +
+          '">';
+      else table += "<tr>";
+
+      var checkBoxControl =
+        '<input type="checkbox" id="select' +
+        requirementId +
+        '" name="select' +
+        requirementId +
+        '"';
+      if (isAlreadyAvailable) checkBoxControl += " disabled = true ";
+      checkBoxControl +=
+        ' /><span class="requirementId">' + requirementId + "</span>";
+
+      table +=
+        '<td class="customtext"><div class="checkboxContainer">' +
+        checkBoxControl +
+        "</div></td>";
+      var standardContainer = "";
+      if (requirementStandard != null) standardContainer = requirementStandard;
+      table +=
+        '<td class="customtext standard"><div class="reqStandardContainer" title="' +
+        requirementTitle +
+        '">' +
+        standardContainer +
+        "</div></td>";
+      table +=
+        '<td class="customtext title"><div class="reqTitleContainer">' +
+        requirementTitle +
+        "</div></td>";
+
+      var requirementType = currentObject.get_item("Taxonomy");
+      var typeContainer = "";
+      if (requirementType != null)
+        typeContainer =
+          requirementType.get_label() +
+          "<br/><span class='customId'><div class='customIdContainer'>" +
+          requirementType.get_termGuid() +
+          "</div></span>";
+      table +=
+        '<td class="customdata"><div class="reqTypeContainer">' +
+        typeContainer +
+        "</div></td>";
+
+      var objectContainer = "";
+      if (requirementObject != null)
+        objectContainer =
+          '<div class="reqObjectContainer alternateColor2">' +
+          requirementObject.get_label() +
+          '</div> <span class="customId"><div class="customIdContainer">' +
+          requirementObject.get_termGuid() +
+          "</div></span>";
+      //V1.2
+      var activityContainer = "";
+      if (requirementActivity != null)
+        activityContainer =
+          '<div class="reqActivityContainer alternateColor1">' +
+          requirementActivity.get_label() +
+          '</div> <span class="customId"><div class="customActivityIdContainer">' +
+          requirementActivity.get_termGuid() +
+          "</div></span>";
+
+      //V1.2
+      table +=
+        '<td class="customdata object">' +
+        objectContainer +
+        activityContainer +
+        "</td>";
+
+      var requirementZone = currentObject.get_item("Zone");
+      var zoneContainer = "";
+      if (requirementZone != null)
+        zoneContainer =
+          requirementZone.get_label() +
+          "<br/><span class='customId'><div class='customIdContainer'>" +
+          requirementZone.get_termGuid() +
+          "</div></span>";
+      table +=
+        '<td class="customdata"><div class="zoneContainer">' +
+        zoneContainer +
+        "</div></td>";
+
+      var requirementHeader = currentObject.get_item("Header");
+      var headerContainer = "";
+      if (requirementHeader != null)
+        headerContainer =
+          requirementHeader.get_label() +
+          "<br/><span class='customId'><div class='customIdContainer'>" +
+          requirementHeader.get_termGuid() +
+          "</div></span>";
+      table +=
+        '<td class="customdata"><div class="reqHeaderContainer">' +
+        headerContainer +
+        "</div></td>";
+
+      var requirementReference = currentObject.get_item("Reference");
+      var referenceContainer = "";
+      if (requirementReference != null)
+        referenceContainer =
+          requirementReference.get_label() +
+          "<br/><span class='customId'><div class='customIdContainer'>" +
+          requirementReference.get_termGuid() +
+          "</div></span>";
+      table +=
+        '<td class="customdata"><div class="referenceContainer">' +
+        referenceContainer +
+        "</div></td>";
+      table += "</tr>";
+    }
+    table += "</tbody>";
+    table += "<tfoot>";
+    table += "<tr>";
+    table += '<th class="customfooter"></th>';
+    arrColumns.forEach(function (colName) {
+      table += '<th class="customfooter">' + colName + "</th>";
+    });
+    table += "</tr>";
+    table += "</tfoot>";
+    table += "</table>";
+    //$(".data").html(table);
+    $(".popup-datatable").html(table);
+    $(".targetAdd").show();
+    $(".lvlObj").show();
+    activateDataTable();
+
+    //$("input[name=selectAll]").click(function () {
+    //if ($('#selectAll').is(':checked'))
+    //$("#requirementdata input[type='checkbox']").attr('checked', 'checked');
+    // else
+    // $("#requirementdata input[type='checkbox']").removeAttr('checked');
+    //});
+  } catch (err) {
+    throw err;
+  }
+}
+
+function hideOriginalForm() {
+  $.each($(".s4-wpcell-plain"), function () {
+    if ($(this).find(".mainPageContainer").length == 0) {
+      $(this).hide();
+    }
+  });
+}
+
+function closePopup() {
+  $(".popup-overlay").hide();
+  callbackInput = null;
+  $(".popup-datatable").html("");
+  $(".headerContainer").removeClass("blurred");
+  $(".bodyContainer").removeClass("blurred");
+  $(".footerContainer").removeClass("blurred");
+  $(".ms-core-overlay").css("overflow", "auto");
+  $(".grouprow").hide();
+  $(".targetAdd").hide();
+  $(".lvlObj").hide();
+  $("div[title='Activity'] > div").html("");
+  $("div[title='Object Group'] > div").html("");
+}
+
+function addSelectedQualification() {
+  var selectedLevelObjectText = $(".lvlObj")
+    .find(".levelObjectMaster :selected")
+    .text();
+  if (selectedLevelObjectText == "Select") {
+    $(".lvlObjErrMessage").show();
+  } else {
+    $(".lvlObjErrMessage").hide();
+    $(".collapse.show").show();
+    var qualificationTableContainer = $(".card-body").html().trim();
+    if (qualificationTableContainer == "") {
+      var table =
+        '<table id="qualificationdata" class="qualificationdata nowrap dataTable">';
+      table += "<thead>";
+      table += "<tr class='active'>";
+      table += '<th class="customheader standardHeader">Standard</th>';
+      table += '<th class="customheader">Requirement</th>';
+      //V1.2
+      table +=
+        '<th class="customheader">Object Group  / <br /><span class="alternateColor1">Activity<span> </th>';
+      table +=
+        '<th class="customheader">Level Standard /<br> Level Object</th>';
+      table +=
+        '<th class="customheader">Approval Date /<br> Expiry Date <br> (MM/DD/YYYY) </th>';
+      table += '<th class="customheader">Approver</th>';
+      table += '<th></th>';
+      table += "</tr>";
+      table += "</thead>";
+      table += "<tbody>";
+      table += "</tbody>";
+      table += "</table>";
+      qualificationTableContainer = table;
+      $(".card-body").html(qualificationTableContainer);
+      $(".card").show();
+      $(".noQualification").hide();
+    }
+
+    var optionCollection = $(".lvlObj").find(".levelObjectMaster")[0].children;
+    var optionsLevelObject = "";
+    for (let i = 0; i < optionCollection.length; i++) {
+      if (optionCollection[i].innerText == selectedLevelObjectText) {
+        optionsLevelObject +=
+          "<option selected='selected' value='" +
+          optionCollection[i].innerText +
+          "'>" +
+          optionCollection[i].innerText +
+          "</option>";
+      } else {
+        optionsLevelObject +=
+          "<option value='" +
+          optionCollection[i].innerText +
+          "'>" +
+          optionCollection[i].innerText +
+          "</option>";
+      }
+    }
+
+    $(".requirementdata tr").each(function () {
+      if (
+        $(this).find("input[type='checkbox']").is(":checked") &&
+        $(this).find(".object").length > 0
+      ) {
+        var rowContainer = "<tr class='active'>";
+        var reqId = $(this).find(".requirementId")[0].innerText;
+        var uniqueKey = '<div class="uniqueContainer">' + reqId + "</div>";
+
+        rowContainer +=
+          '<td class="customdata idBody"><div class="checkboxContainer"></div>' +
+          uniqueKey +
+          "</td>";
+
+        rowContainer += $(this)
+          .find(".standard")[0]
+          .outerHTML.replace("reqStandardContainer", "qualificationStandard")
+          .replace("standard", "standardBody");
+
+        rowContainer += $(this)
+          .find(".title")[0]
+          .outerHTML.replace("title", "titleBody")
+          .replace("reqTitleContainer", "qualificationTitle");
+
+        //V1.2
+        rowContainer += $(this)
+          .find(".object")[0]
+          .outerHTML.replace("reqObjectContainer", "qualificationObjectGroup")
+          .replace("reqActivityContainer", "qualificationActivityGroup");
+
+        var levelStandard =
+          "<select id='levelStandard_'" +
+          reqId +
+          "' class='levelStandard'><option value='Tester'>Tester</option>" +
+          "<option value='Authorizer'>Authorizer</option>" +
+          "<option value='Level 2'>Level 2</option></select>";
+
+        rowContainer +=
+          '<td class="customdata"><div class="customdataContainer">' +
+          levelStandard +
+          "</div>";
+
+        var levelObject =
+          "<select id='levelObject_" +
+          reqId +
+          "' class='levelObject'>" +
+          optionsLevelObject +
+          "</select>";
+
+        rowContainer +=
+          '<div class="customtextContainer">' + levelObject + "</div></td>";
+        rowContainer +=
+          '<td class="customdata"><div class="datetimeContainer "><input size="16" type="text" value="" class="form_datetime approvalDate"></div>';
+        rowContainer +=
+          '<div class="datetimeContainer "><input size="16" type="text" value="" class="form_datetime expiryDate"></div></td>';
+        rowContainer +=
+          '<td class="customdata"></td>';
+        rowContainer +=
+          '<td class="customButton"><div style="text-align:center;"><button type="button" id="deleteQualification" class="btn btn-danger btn-circle deleteQualification" style="margin:2px;" onclick="deleteRow(this)" title="Delete"><i class="fa fa-trash"></i></button></div></td>';
+        rowContainer += "</tr>";
+        $("#qualificationdata").find("tbody").append(rowContainer);
+        totalItemsToAppend = totalItemsToAppend + 1;
+
+        //V1.2
+        if (
+          $(this).find(".object .customActivityIdContainer") != null &&
+          $(this).find(".object .customActivityIdContainer").length > 0
+        ) {
+          updateLevelObjectForObjectGroup(
+            selectedLevelObjectText,
+            $(this).find(".object .customActivityIdContainer")[0].innerText
+          );
         }
-        .middle-ring {
-            position: absolute;
-            width: 200px;
-            height: 200px;
-            border: 3px dashed red;
-            border-radius: 50%;
-            animation: rotate 5s linear infinite;
+
+        if (
+          $(this).find(".object .customIdContainer") != null &&
+          $(this).find(".object .customIdContainer").length > 0
+        ) {
+          updateLevelObjectForObjectGroup(
+            selectedLevelObjectText,
+            $(this).find(".object .customIdContainer")[0].innerText
+          );
         }
-        .ball {
-            position: absolute;
-            width: 30px;
-            height: 30px;
-            background-color: #fefde5;
-            border-radius: 50%;
+      }
+    });
+
+    $(".approverrow").show();
+    if (status == "Approved" || status == "Rejected")
+      $(".commentslabel").html(
+        "<span class='mandatoryflag mandatoryComment'>*</span>"
+      );
+
+    $(".form_datetime").each(function () {
+      $(this).datepicker({
+        format: "yyyy-mm-dd",
+        changeMonth: true,
+        changeYear: true,
+      });
+    });
+    $("#qualificationdata tr.active").hover(
+      function () {
+        $(this).addClass("qualificationRowHighlight");
+        $(this).removeClass("qualificationRowNotFocused");
+      },
+      function () {
+        $(this).addClass("qualificationRowNotFocused");
+        $(this).removeClass("qualificationRowHighlight");
+      }
+    );
+
+    if (isExpert) {
+      disableDatePicker();
+      $(".levelObject").attr("disabled", true);
+    }
+
+    closePopup();
+  }
+}
+
+function activateDataTable() {
+  try {
+    $(".grouptoggleswitch").remove();
+    $(".popup-datatable").before(getdatatableColumns());
+    var needsPaging = $("input.pagedata").is(":checked");
+
+    $(".groupfilter").change(function () {
+      toggleLoader(true);
+      setTimeout(function () {
+        insertSliderControl();
+        var colIndex = $(".groupfilter :selected").attr("colindex");
+        groupDataTable(colIndex);
+        toggleLoader(false);
+      }, 100);
+    });
+
+    // Setup - add a text input to each footer cell
+    $("#requirementdata tfoot th").each(function () {
+      var title = $(this).text();
+      if (title.trim() != "")
+        $(this).html(
+          '<input type="text" placeholder="Type to search within column" title="Type in term to search within column ' +
+            title +
+            '" />'
+        );
+    });
+    $(".popup-datatable").show();
+    // DataTable
+    var table = $("#requirementdata").DataTable({
+      autoWidth: false,
+      paging: needsPaging,
+      scrollY: "300px",
+      scrollCollapse: true,
+      columnDefs: [
+        { width: 20, targets: 0 },
+        { width: 120, targets: [1, 3] },
+        { width: 50, targets: [2, 4, 5, 6, 7] },
+      ],
+      pageLength: 5,
+      lengthMenu: [5, 10, 15, 20, 30, 50, 100, 250, 500, 1000],
+    });
+
+    //Apply the search
+    table.columns().every(function () {
+      var that = this;
+
+      $("input[type=text]", this.footer()).on(
+        "keyup change clear",
+        function () {
+          if (that.search() !== this.value) {
+            that.search(this.value).draw();
+          }
         }
-        @keyframes rotate {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
+      );
+    });
+
+    $(".infoMessage").html("Query executed successfully");
+  } catch (err) {
+    throw err;
+  } finally {
+    toggleLoader(false);
+  }
+}
+
+function groupDataTable(columnIndex) {
+  try {
+    // DataTable
+    var table = $("#requirementdata").DataTable({
+      destroy: true,
+      paging: false,
+      searching: false,
+      scrollY: "300px",
+      autoWidth: false,
+      columnDefs: [{ visible: false, targets: columnIndex }],
+      order: [[columnIndex, "asc"]],
+      displayLength: 10,
+      drawCallback: function (settings) {
+        var api = this.api();
+        var rows = api.rows({ page: "current" }).nodes();
+        var last = null;
+        var counter = 1;
+        var lastCounter = $(".groupCount");
+        api
+          .column(columnIndex, { page: "current" })
+          .data()
+          .each(function (group, i) {
+            if (last !== group) {
+              if (lastCounter.length != 0) {
+                $(lastCounter).html(
+                  "<span class='groupTotal'> Count : " + counter + "</span>"
+                );
+                counter = 1;
+              }
+              $(rows)
+                .eq(i)
+                .before(
+                  '<tr class="group"><td class="groupCount groupcounter' +
+                    i +
+                    '"></td><td class="groupHeader" colspan="17">' +
+                    group +
+                    "</td></tr>"
+                );
+              lastCounter = $(".groupcounter" + i);
+              //$(rows).eq(i).prev(".group").find(".groupCount").html(counter);
+              last = group;
+            } else {
+              counter = counter + 1;
+            }
+          });
+        $(lastCounter).html(
+          "<span class='groupTotal'> Count : " + counter + "</span>"
+        );
+      },
+    });
+
+    $("#requirementdata").find("tfoot").remove();
+
+    // Order by the grouping
+    $("#requirementdata tbody").on("click", "tr.group", function () {
+      toggleLoader(true);
+      var currentOrder = table.order()[0];
+      if (currentOrder != null) {
+        if (currentOrder[0] === columnIndex && currentOrder[1] === "asc") {
+          table.order([columnIndex, "desc"]).draw();
+        } else {
+          table.order([columnIndex, "asc"]).draw();
         }
-    </style>
-</head>
-<body>
-    ''''''" "
-    <div>
-        <p>hi , hello pavithra ddddd</p>
-    </div>
-    <div class="ring">
-        <div class="middle-ring">
-            <div class="ball" id="ball1"></div>
-            <div class="ball" id="ball2"></div>
-            <div class="ball" id="ball3"></div>
-            <div class="ball" id="ball4"></div>
-            <div class="ball" id="ball5"></div>
-            <div class="ball" id="ball6"></div>
-        </div>
-    </div>
-    <script>
-        function positionBalls() {
-            const balls = document.querySelectorAll('.ball');
-            const radius = 80;
-            const centerX = 100;
-            const centerY = 100;
-            balls.forEach((ball, index) => {
-                const angle = (index / balls.length) * (2 * Math.PI);
-                const x = centerX + radius * Math.cos(angle) - 15;
-                const y = centerY + radius * Math.sin(angle) - 15;
-                ball.style.transform = `translate(${x}px, ${y}px)`;
-            });
+      } else {
+        table.order([columnIndex, "asc"]).draw();
+      }
+      toggleLoader(false);
+    });
+
+    insertSliderControl();
+
+    $(".popup-datatable").show();
+    $(".infoMessage").html("Query results grouped successfully");
+  } catch (err) {
+    throw err;
+  }
+}
+
+function getdatatableColumns() {
+  try {
+    $(".grouprow").remove();
+    var columnList =
+      "<div class='row grouprow'><div class='col-md-4'><label>Group Column</label><select class='form-control groupfilter'>";
+    $.each(
+      $("#requirementdata").find("tr:first th"),
+      function (colIndex, colItem) {
+        columnList +=
+          '<option colindex="' +
+          colIndex +
+          '">' +
+          colItem.innerText +
+          "</option>";
+      }
+    );
+    columnList += "</select><br></div></div>";
+    return columnList;
+  } catch (err) {
+    throw err;
+  }
+}
+
+function insertSliderControl() {
+  $("#requirementdata tr[role='row']").show();
+  $(".grouptoggleswitch").remove();
+  $(".popup-datatable").before(
+    '<div class="row grouptoggleswitch"><div class="col-md-4"><label>Expand or collapse group headers</label><br><label class="switch"><input class="form-control" type="checkbox"><span class="slider round"></span></label><br><br></div></div>'
+  );
+  $(".slider").click(function () {
+    if (
+      (!$(".slider").hasClass("expanded") &&
+        !$(".slider").hasClass("collapsed")) ||
+      $(".slider").hasClass("expanded")
+    ) {
+      toggleLoader(true);
+      setTimeout(function () {
+        $("#requirementdata tr[role='row']").hide();
+        $(".slider").removeClass("expanded");
+        $(".slider").addClass("collapsed");
+        toggleLoader(false);
+      }, 500);
+    } else {
+      toggleLoader(true);
+      setTimeout(function () {
+        $("#requirementdata tr[role='row']").show();
+        $(".slider").removeClass("collapsed");
+        $(".slider").addClass("expanded");
+        toggleLoader(false);
+      }, 500);
+    }
+  });
+}
+
+function toggleLoader(flag) {
+  if (flag) {
+    $(".ms-core-overlay").css("overflow", "hidden");
+    $("#overlay").show();
+    $(".loader").show();
+  } else {
+    $(".ms-core-overlay").css("overflow", "auto");
+    $("#overlay").hide();
+    $(".loader").hide();
+  }
+}
+
+function validateExpertMaster() {
+  var isValid = true;
+  clearValidationMesages();
+
+  if ($(".legalEntity .valid-text").length == 0) {
+    $(".legalEntity")
+      .next(".fieldErrMessage")
+      .html("This is a mandatory field");
+    $(".legalEntity").next(".fieldErrMessage").show();
+    isValid = false;
+  }
+
+  if ($(".region .valid-text").length == 0) {
+    $(".region").next(".fieldErrMessage").html("This is a mandatory field");
+    $(".region").next(".fieldErrMessage").show();
+    isValid = false;
+  }
+
+  if ($(".documentation textarea").val() == "") {
+    $(".documentation")
+      .next(".fieldErrMessage")
+      .html("This is a mandatory field");
+    $(".documentation").next(".fieldErrMessage").show();
+    isValid = false;
+  }
+
+  if ($(".technicalcv textarea").val() == "") {
+    $(".technicalcv")
+      .next(".fieldErrMessage")
+      .html("This is a mandatory field");
+    $(".technicalcv").next(".fieldErrMessage").show();
+    isValid = false;
+  }
+
+  var expertPicker =
+    SPClientPeoplePicker.SPClientPeoplePickerDict[
+      $("div[title='Expert']").attr("id")
+    ];
+  if (expertPicker.IsEmpty()) {
+    //console.log("expert is mandatory");
+    expertPicker.ShowErrorMessage("This is a mandatory field");
+    isValid = false;
+  } else if (expertPicker.GetAllUserInfo().length == 0) {
+    expertPicker.ShowErrorMessage("This field is not set properly");
+    isValid = false;
+  } else {
+    if (expertPicker.GetAllUserInfo()[0].IsResolved == false) {
+      expertPicker.ShowErrorMessage("This field is not set properly");
+      isValid = false;
+    } else {
+      var users = expertPicker.GetAllUserInfo();
+      expertKey = GetUserID(users[0].Key);
+      expertPickerKey = expertPicker;
+    }
+  }
+
+  var supervisorPicker =
+    SPClientPeoplePicker.SPClientPeoplePickerDict[
+      $("div[title='Supervisor']").attr("id")
+    ];
+  if (supervisorPicker.IsEmpty()) {
+    //console.log("Supervisor field is mandatory");
+    supervisorPicker.ShowErrorMessage("This is a mandatory field");
+    isValid = false;
+  } else if (supervisorPicker.GetAllUserInfo().length == 0) {
+    supervisorPicker.ShowErrorMessage("This field is not set properly");
+    isValid = false;
+  } else {
+    if (supervisorPicker.GetAllUserInfo()[0].IsResolved == false) {
+      supervisorPicker.ShowErrorMessage("This field is not set properly");
+      isValid = false;
+    } else {
+      var users = supervisorPicker.GetAllUserInfo();
+      supervisorKey = GetUserID(users[0].Key);
+    }
+  }
+
+  var regionalResourceOwnerPicker =
+    SPClientPeoplePicker.SPClientPeoplePickerDict[
+      $("div[title='Regional Resource Owner']").attr("id")
+    ];
+  if (!regionalResourceOwnerPicker.IsEmpty()) {
+    if (regionalResourceOwnerPicker.GetAllUserInfo().length == 0) {
+      regionalResourceOwnerPicker.ShowErrorMessage(
+        "This field is not set properly"
+      );
+      isValid = false;
+    } else if (
+      regionalResourceOwnerPicker.GetAllUserInfo()[0].IsResolved == false
+    ) {
+      regionalResourceOwnerPicker.ShowErrorMessage(
+        "This field is not set properly"
+      );
+      isValid = false;
+    } else {
+      var users = regionalResourceOwnerPicker.GetAllUserInfo();
+      regionalOwnerKey = GetUserID(users[0].Key);
+    }
+  }
+
+  var approverPicker =
+    SPClientPeoplePicker.SPClientPeoplePickerDict[
+      $("div[title='Approver']").attr("id")
+    ];
+  if (!approverPicker.IsEmpty()) {
+    if (approverPicker.GetAllUserInfo().length == 0) {
+      approverPicker.ShowErrorMessage("This field is not set properly");
+      isValid = false;
+    } else if (approverPicker.GetAllUserInfo()[0].IsResolved == false) {
+      approverPicker.ShowErrorMessage("This field is not set properly");
+      isValid = false;
+    } else {
+      var users = approverPicker.GetAllUserInfo();
+      approverKey = GetUserID(users[0].Key);
+    }
+  }
+
+  if (!isValid) {
+    $(".footerContainer .summaryErrMessage").append(
+      " One or more validation errors needs to be fixed. "
+    );
+    $(".footerContainer .summaryErrMessage").show();
+  } else {
+    $(".footerContainer .summaryErrMessage").empty();
+    $(".footerContainer .summaryErrMessage").hide();
+  }
+
+  return isValid;
+}
+
+function validate() {
+  var isValid = true;
+  clearValidationMesages();
+
+  if ($(".status :selected").text() == "Select") {
+    $(".status").next(".fieldErrMessage").html("This is a mandatory field");
+    $(".status").next(".fieldErrMessage").show();
+    isValid = false;
+  }
+
+  if ($(".legalEntity .valid-text").length == 0) {
+    $(".legalEntity")
+      .next(".fieldErrMessage")
+      .html("This is a mandatory field");
+    $(".legalEntity").next(".fieldErrMessage").show();
+    isValid = false;
+  }
+
+  if ($(".region .valid-text").length == 0) {
+    $(".region").next(".fieldErrMessage").html("This is a mandatory field");
+    $(".region").next(".fieldErrMessage").show();
+    isValid = false;
+  }
+
+  if ($(".documentation textarea").val() == "") {
+    $(".documentation")
+      .next(".fieldErrMessage")
+      .html("This is a mandatory field");
+    $(".documentation").next(".fieldErrMessage").show();
+    isValid = false;
+  }
+
+  if ($(".technicalcv textarea").val() == "") {
+    $(".technicalcv")
+      .next(".fieldErrMessage")
+      .html("This is a mandatory field");
+    $(".technicalcv").next(".fieldErrMessage").show();
+    isValid = false;
+  }
+
+  if (isApprover) {
+    if ($(".ApproverComments textarea").val() == "") {
+      $(".ApproverComments")
+        .next(".fieldErrMessage")
+        .html("This is a mandatory field");
+      $(".ApproverComments").next(".fieldErrMessage").show();
+      isValid = false;
+    }
+    if ($("#qualificationdata tr").length > 0) {
+      $.each($("#qualificationdata tr"), function (index, tr) {
+        if (index > 0) {
+          if ($(tr).find("input.approvalDate").val() == "") {
+            $(".noDatefromApprover.fieldErrMessage").html(
+              "Approval and Expiry date are mandatory for each qualification. "
+            );
+            $(".noDatefromApprover.fieldErrMessage").show();
+            isValid = false;
+          }
+          if ($(tr).find("input.expiryDate").val() == "") {
+            $(".noDatefromApprover.fieldErrMessage").html(
+              "Approval and Expiry date are mandatory for each qualification. "
+            );
+            $(".noDatefromApprover.fieldErrMessage").show();
+            isValid = false;
+          }
         }
-        positionBalls();
-    </script>
-</body>
-</html>
+      });
+    }
+  }
+
+  var expertPicker =
+    SPClientPeoplePicker.SPClientPeoplePickerDict[
+      $("div[title='Expert']").attr("id")
+    ];
+  if (expertPicker.IsEmpty()) {
+    //console.log("expert is mandatory");
+    expertPicker.ShowErrorMessage("This is a mandatory field");
+    isValid = false;
+  } else if (expertPicker.GetAllUserInfo().length == 0) {
+    expertPicker.ShowErrorMessage("This field is not set properly");
+    isValid = false;
+  } else {
+    if (expertPicker.GetAllUserInfo()[0].IsResolved == false) {
+      expertPicker.ShowErrorMessage("This field is not set properly");
+      isValid = false;
+    } else {
+      var users = expertPicker.GetAllUserInfo();
+      expertKey = GetUserID(users[0].Key);
+      expertPickerKey = expertPicker;
+    }
+  }
+
+  var supervisorPicker =
+    SPClientPeoplePicker.SPClientPeoplePickerDict[
+      $("div[title='Supervisor']").attr("id")
+    ];
+  if (supervisorPicker.IsEmpty()) {
+    //console.log("Supervisor field is mandatory");
+    supervisorPicker.ShowErrorMessage("This is a mandatory field");
+    isValid = false;
+  } else if (supervisorPicker.GetAllUserInfo().length == 0) {
+    supervisorPicker.ShowErrorMessage("This field is not set properly");
+    isValid = false;
+  } else {
+    if (supervisorPicker.GetAllUserInfo()[0].IsResolved == false) {
+      supervisorPicker.ShowErrorMessage("This field is not set properly");
+      isValid = false;
+    } else {
+      var users = supervisorPicker.GetAllUserInfo();
+      supervisorKey = GetUserID(users[0].Key);
+    }
+  }
+
+  var approverPicker =
+    SPClientPeoplePicker.SPClientPeoplePickerDict[
+      $("div[title='Approver']").attr("id")
+    ];
+  if (!approverPicker.IsEmpty()) {
+    if (approverPicker.GetAllUserInfo().length == 0) {
+      approverPicker.ShowErrorMessage("This field is not set properly");
+      isValid = false;
+    } else if (approverPicker.GetAllUserInfo()[0].IsResolved == false) {
+      approverPicker.ShowErrorMessage("This field is not set properly");
+      isValid = false;
+    } else {
+      var users = approverPicker.GetAllUserInfo();
+      approverKey = GetUserID(users[0].Key);
+    }
+  }
+  if (
+    status == "Submitted for approval" &&
+    $("#qualificationdata tr").length > 1
+  ) {
+    var approverPicker =
+      SPClientPeoplePicker.SPClientPeoplePickerDict[
+        $("div[title='Approver']").attr("id")
+      ];
+    if (approverPicker.IsEmpty()) {
+      approverPicker.ShowErrorMessage("This is a mandatory field");
+      isValid = false;
+    }
+  }
+
+  var regionalResourceOwnerPicker =
+    SPClientPeoplePicker.SPClientPeoplePickerDict[
+      $("div[title='Regional Resource Owner']").attr("id")
+    ];
+  if (!regionalResourceOwnerPicker.IsEmpty()) {
+    if (regionalResourceOwnerPicker.GetAllUserInfo().length == 0) {
+      regionalResourceOwnerPicker.ShowErrorMessage(
+        "This field is not set properly"
+      );
+      isValid = false;
+    } else if (
+      regionalResourceOwnerPicker.GetAllUserInfo()[0].IsResolved == false
+    ) {
+      regionalResourceOwnerPicker.ShowErrorMessage(
+        "This field is not set properly"
+      );
+      isValid = false;
+    } else {
+      var users = regionalResourceOwnerPicker.GetAllUserInfo();
+      regionalOwnerKey = GetUserID(users[0].Key);
+    }
+  }
+
+  if (!isValid) {
+    $(".footerContainer .summaryErrMessage").append(
+      " One or more validation errors needs to be fixed. "
+    );
+    $(".footerContainer .summaryErrMessage").show();
+  } else {
+    $(".footerContainer .summaryErrMessage").empty();
+    $(".footerContainer .summaryErrMessage").hide();
+  }
+
+  return isValid;
+}
+
+function clearValidationMesages() {
+  $.each($(".fieldErrMessage"), function (index, value) {
+    $(value).empty();
+    $(value).hide();
+  });
+  $(".sp-peoplepicker-errorMsg").remove();
+
+  $.each($("#qualificationdata tr"), function (index, tr) {
+    $(tr).find(".customdata > input").removeClass("errorBorder");
+  });
+  $(".summaryErrMessage").html("");
+}
+
+// Get the user ID.
+function GetUserID(logonName) {
+  var item = {
+    logonName: logonName,
+  };
+  var UserId = $.ajax({
+    url: _spPageContextInfo.siteAbsoluteUrl + "/_api/web/ensureuser",
+    type: "POST",
+    async: false,
+    contentType: "application/json;odata=verbose",
+    data: JSON.stringify(item),
+    headers: {
+      Accept: "application/json;odata=verbose",
+      "X-RequestDigest": $("#__REQUESTDIGEST").val(),
+    },
+    success: function (data) {
+      //return data.Id + ';#' + data.Title + ';#';
+      return data.Id;
+    },
+    error: function (data) {
+      failure(data);
+    },
+  });
+  return UserId.responseJSON.d.Id;
+}
+
+function success() {
+  var id = entry.get_item("ID");
+  console.log("Yes saved " + id);
+}
+
+function saveExpertMaster() {
+  disableSave();
+  toggleLoader(true);
+  if (validateExpertMaster()) {
+    $(".errorInfo").hide();
+    saveExpert(false);
+    return true;
+  } else {
+    toggleLoader(false);
+    $(".summaryErrMessage").show();
+    $(".summaryErrMessage").append(errorValidation);
+    enableSave();
+    return false;
+  }
+}
+
+function customsave() {
+  if (
+    isExpert &&
+    (initialStatus == "Draft" || status == "Draft") &&
+    $("#qualificationdata tr").length <= 1
+  ) {
+    saveExpertMaster();
+  } else if (
+    isExpert &&
+    (initialStatus == "Submitted for approval" ||
+      status == "Approved" ||
+      status == "Rejected")
+  ) {
+    saveExpertMaster();
+  } else {
+    disableSave();
+    toggleLoader(true);
+    if (validate()) {
+      $(".errorInfo").hide();
+      if (
+        $("#qualificationdata tr").length <= 1 &&
+        status == "Submitted for approval"
+      ) {
+        $(".status select").val("Draft").change();
+        alert(
+          "The item will not be sent for Approval and will remain in draft status as there are no Qualifications to Approve."
+        );
+      } else if (
+        $("#qualificationdata tr").length - 1 ==
+          $("#qualificationdata .qualificationApproved").length &&
+        status == "Submitted for approval"
+      ) {
+        $(".status select").val("Draft").change();
+        alert(
+          "The item will not be sent for Approval and will remain in draft status as there are no new Qualifications to Approve."
+        );
+      } //$(".mdmdatacol.activity").html("");
+      //$(".mdmdatacol.objectgroup").html("");
+      saveExpert(true);
+      return true;
+    } else {
+      toggleLoader(false);
+      $(".summaryErrMessage").show();
+      $(".summaryErrMessage").append(errorValidation);
+      //console.log(errorValidation);
+      enableSave();
+      return false;
+    }
+  }
+}
+
+function getQualifications() {
+  var expertName = $("div[title='Expert'] .ms-entity-resolved")[0].innerText;
+  var context = new SP.ClientContext(siteUrl);
+  var businessList = context
+    .get_web()
+    .get_lists()
+    .getByTitle(qualificationListName);
+  //V1.2
+  var queryXml =
+    "<View><Query><Where><Eq><FieldRef Name='Expert' />" +
+    "<Value Type='User'>" +
+    expertName +
+    "</Value></Eq></Where></Query>" +
+    "<ViewFields><FieldRef Name='ApprovalDate' /><FieldRef Name='ID' /><FieldRef Name='Title' />" +
+    "<FieldRef Name='ExpiryDate'  /> <FieldRef Name='LevelObjectCategory'  /> <FieldRef Name='LevelStandard'  />" +
+    "<FieldRef Name='ObjectGroup'  /><FieldRef Name='Standard' /><FieldRef Name='RequirementId' /><FieldRef Name='Activity' /><FieldRef Name='Approver' /><FieldRef Name='Status' /><FieldRef Name='Editor' /><FieldRef Name='Modified' /></ViewFields></View>";
+  //console.log(queryXml);
+  var query = new SP.CamlQuery();
+  query.set_viewXml(queryXml);
+  var items = businessList.getItems(query);
+  context.load(items);
+  context.executeQueryAsync(function () {
+    if (items != null && items.get_count() > 0) {
+      if (isAuthorizedMember || isSupervisor || isP04Member) {
+        FillQualification(items);
+        $(".collapse.show").show();
+      }
+    } else {
+      $(".noQualification").show();
+      toggleLoader(false);
+      if (isApprover) {
+        disableSave();
+        $(".noActionNeededForApprover").show();
+      }
+      if (isSupervisor) {
+        triggerSupervisorActionNoQualification();
+      }
+    }
+  });
+}
+
+function FillQualification(items) {
+  var listEnumerator = items.getEnumerator();
+
+  var table =
+    '<table id="qualificationdata" class="qualificationdata nowrap dataTable">';
+  table += "<thead>";
+  table += "<tr>";
+  table += '<th class="customheader standardHeader">Standard</th>';
+  table += '<th class="customheader">Requirement</th>';
+  //V1.2
+  table +=
+    '<th class="customheader">Object Group  / <br /> <span class="alternateColor1">Activity<span> </th>';
+  table += '<th class="customheader">Level Standard /<br> Level Object</th>';
+  table +=
+      '<th class="customheader">Approval Date /<br> Expiry Date <br> (MM/DD/YYYY)</th>';
+  table += '<th class="customheader">Approver</th>';
+  table += '<th></th>';
+  table += "</tr>";
+  table += "</thead>";
+  table += "<tbody>";
+  table += "</tbody>";
+  table += "</table>";
+  var qualificationTableContainer = table;
+  $(".card-body").html(qualificationTableContainer);
+  $(".card").show();
+
+  while (listEnumerator.moveNext()) {
+    var qualificationId = listEnumerator.get_current().get_item("ID");
+    var qualificationTitle = listEnumerator.get_current().get_item("Title");
+    if (qualificationTitle == null || qualificationTitle == undefined)
+      qualificationTitle = "";
+    var qualificationStandard = listEnumerator
+      .get_current()
+      .get_item("Standard");
+    if (qualificationStandard == null || qualificationStandard == undefined)
+      qualificationStandard = "";
+    var qualificationObject = listEnumerator
+      .get_current()
+      .get_item("ObjectGroup");
+    if (qualificationObject == null || qualificationObject == undefined)
+      qualificationObject = "";
+    //V1.2
+    var qualificationActivity = listEnumerator
+      .get_current()
+      .get_item("Activity");
+    if (qualificationActivity == null || qualificationActivity == undefined)
+      qualificationActivity = "";
+    var qualificationUniqueKey = listEnumerator
+      .get_current()
+      .get_item("RequirementId");
+    var approvalDate = "";
+    if (listEnumerator.get_current().get_item("ApprovalDate") != null)
+      approvalDate = new Date(
+        listEnumerator.get_current().get_item("ApprovalDate")
+      ).format("MM/dd/yyyy");
+    var expiryDate = "";
+    if (listEnumerator.get_current().get_item("ExpiryDate") != null)
+      expiryDate = new Date(
+        listEnumerator.get_current().get_item("ExpiryDate")
+      ).format("MM/dd/yyyy");
+
+      var approverObject = listEnumerator
+            .get_current()
+            .get_item("Approver");
+        if (approverObject == null || approverObject == undefined)
+            approverObject = "";
+            
+        var qualificationStatus = listEnumerator.get_current().get_item("Status");
+    var rowContainer = "<tr class='qualificationRowDisabled'>";
+    if (isApprover && (qualificationStatus  == "Submitted for approval"))
+      rowContainer = "<tr class='readyToApprove' >";
+    else if (isExpert && (approvalDate == "" || expiryDate == ""))
+      rowContainer = "<tr class='stillInDraft qualificationRowDisabled' >";
+    else if (approvalDate != "" && expiryDate != "")
+      rowContainer =
+        "<tr class='qualificationApproved qualificationRowDisabled' >";
+
+    var uniqueKey =
+      '<div class="uniqueContainer">' + qualificationUniqueKey + "</div>";
+
+    rowContainer +=
+      '<td class="customdata idBody"><div class="checkboxContainer">' +
+      qualificationId +
+      "</div>" +
+      uniqueKey +
+      "</td>";
+
+    rowContainer +=
+      '<td class="customdata standardBody"><div class="qualificationStandard">' +
+      qualificationStandard +
+      "</div></td>";
+    rowContainer +=
+      '<td class="customdata titleBody"><div class="qualificationTitle">' +
+      qualificationTitle +
+      "</div></td>";
+
+    var objectContainer = "";
+    if (qualificationObject != null && qualificationObject != "")
+      objectContainer =
+        qualificationObject.get_label() +
+        "<br/><span class='customId'><div class='customIdContainer'>" +
+        qualificationObject.get_termGuid() +
+        "</div></span>";
+
+    //V1.2
+    var activityContainer = "";
+    if (qualificationActivity != null && qualificationActivity != "")
+      activityContainer =
+        qualificationActivity.get_label() +
+        "<br/><span class='customId'><div class='customIdContainer'>" +
+        qualificationActivity.get_termGuid() +
+        "</div></span>";
+
+    //V1.2
+    rowContainer +=
+      '<td class="customdata object"><div class="customLongTextContainer alternateColor2">' +
+      objectContainer +
+      '</div><div class="customLongTextContainer alternateColor1">' +
+      activityContainer +
+      "</div></td>";
+
+    var qualificationLevelStandard = listEnumerator
+      .get_current()
+      .get_item("LevelStandard");
+
+    var levelStandard =
+      "<select id='levelStandard_" +
+      qualificationId +
+      "' class='levelStandard'>";
+
+    if (qualificationLevelStandard == "Tester")
+      levelStandard +=
+        "<option selected='selected' value='Tester'>Tester</option>";
+    else levelStandard += "<option value='Tester'>Tester</option>";
+
+    if (qualificationLevelStandard == "Authorizer")
+      levelStandard +=
+        "<option selected='selected' value='Authorizer'>Authorizer</option>";
+    else levelStandard += "<option value='Authorizer'>Authorizer</option>";
+    
+    if (qualificationLevelStandard == "Level 2")
+      levelStandard +=
+        "<option selected='selected' value='Level 2'>Level 2</option>";
+    else levelStandard += "<option value='Level 2'>Level 2</option>";
+
+
+    levelStandard += "</select>";
+    rowContainer +=
+      '<td class="customdata"><div class="customdataContainer">' +
+      levelStandard +
+      "</div>";
+
+    var qualificationLevelObjectCategory = listEnumerator
+      .get_current()
+      .get_item("LevelObjectCategory");
+    var levelObject =
+      "<select id='levelObject_" + qualificationId + "' class='levelObject'>";
+    if (qualificationLevelObjectCategory == "Tester (partial/candidate)")
+      levelObject +=
+        "<option selected='selected' value='Tester (partial/candidate)'>Tester (partial/candidate)</option>";
+    else
+      levelObject +=
+        "<option value='Tester (partial/candidate)'>Tester (partial/candidate)</option>";
+
+    if (qualificationLevelObjectCategory == "Tester")
+      levelObject +=
+        "<option selected='selected' value='Tester'>Tester</option>";
+    else levelObject += "<option value='Tester'>Tester</option>";
+
+    if (qualificationLevelObjectCategory == "Authorizer (candidate)")
+      levelObject +=
+        "<option selected='selected' value='Authorizer (candidate)'>Authorizer (candidate)</option>";
+    else
+      levelObject +=
+        "<option value='Authorizer (candidate)'>Authorizer (candidate)</option>";
+
+    if (qualificationLevelObjectCategory == "Authorizer")
+      levelObject +=
+        "<option selected='selected' value='Authorizer'>Authorizer</option>";
+    else levelObject += "<option value='Authorizer'>Authorizer</option>";
+
+    if (qualificationLevelObjectCategory == "Level 2")
+      levelObject +=
+        "<option selected='selected' value='Level 2'>Level 2</option>";
+    else levelObject += "<option value='Level 2'>Level 2</option>";
+
+    levelObject += "</select>";
+    rowContainer +=
+      '<div class="customtextContainer">' + levelObject + "</div></td>";
+    //if(isApprover && approvalDate == "")
+    //approvalDate = new Date();
+    var approvalDateInput =
+      '<input size="16" type="text" value="' +
+      approvalDate +
+      '" readonly class="form_datetime approvalDate';
+    if (isApprover && approvalDate != "")
+      approvalDateInput += " alreadyApproved ";
+    approvalDateInput += '">';
+    if (isApprover) approvalDateInput += '<span class="required">*</span>';
+    rowContainer +=
+      '<td class="customdata"><div class="datetimeContainer ">' +
+      approvalDateInput +
+      "</div>";
+
+    var expiryDateInput =
+      '<input size="16" type="text" value="' +
+      expiryDate +
+      '" readonly class="form_datetime expiryDate';
+    if (isApprover && expiryDate != "") expiryDateInput += " alreadyApproved ";
+    expiryDateInput += '">';
+    if (isApprover) expiryDateInput += '<span class="required">*</span>';
+    rowContainer +=
+      '<div class="datetimeContainer ">' + expiryDateInput + "</div></td>";
+ var approverContainer = "";
+        if (approverObject != null && approverObject != "")
+            approverContainer =
+                approverObject.get_lookupValue() +
+                "<br/><span class='customId'><div class='customIdContainer'>" +
+                approverObject.get_lookupId() +
+                "</div></span>";
+        
+        var statusIcon = "";
+        switch (qualificationStatus) {
+           case "Submitted for approval": statusIcon = (approvalDate != "" && expiryDate != "") ? '<i id="approverStatusIcon" class="fa fa-check-circle" title="The Qualification level was updated and sent for Approval" style="font-size:15px;color:#cc7a00; cursor:pointer; padding-right:5px;"></i>' :'<i id="approverStatusIcon" class="fa fa-check-circle" title="The new Qualification was sent for Approval." style="font-size:15px;color:#FFD300; cursor:pointer; padding-right:5px;"></i>'; break;
+           case "Approved": statusIcon = '<i id="approverStatusIcon" class="fa fa-check-circle" title="The Qualification is Approved." style="font-size:15px;color:green; cursor:pointer; padding-right:5px;"></i>'; break;
+           case "Rejected": statusIcon = '<i id="approverStatusIcon" class="fa fa-exclamation-circle" title="The Qualification request was rejected.\n Please see below for comments from Approver." style="font-size:15px;color:red; cursor:pointer; padding-right:5px;"></i>'; break;
+        default:
+           statusIcon = "";
+        }
+
+        var approverColumn =  statusIcon +  approverContainer;
+    rowContainer +=
+            '<td class="customdata">'+ approverColumn + '</td>';
+        if (approvalDate != "" && expiryDate != "")
+            rowContainer += '<td class="customButton"><div style="text-align:center;"><button type="button" id="deleteQualification" class="btn btn-danger btn-circle deleteQualification" style="margin:2px;" onclick="deleteRow(this)" title="Delete"><i class="fa fa-trash"></i></button> <button type="button" id="editQualification" class="btn btn-primary btn-circle editQualification" style="margin:2px;" onclick="editRow(this)" title="Edit"><i class="fa fa-edit"></i></button></div></td>';
+        else 
+       rowContainer +='<td class="customButton"><div style="text-align:center;"><button type="button" id="deleteQualification" class="btn btn-danger btn-circle deleteQualification" style="margin:2px;" onclick="deleteRow(this)" title="Delete"><i class="fa fa-trash"></i></button></div></td>';
+    rowContainer += "</tr>";
+
+    $("#qualificationdata").find("tbody").append(rowContainer);
+  }
+
+  $(".form_datetime").datepicker({
+    format: "yyyy-mm-dd",
+    changeMonth: true,
+    changeYear: true,
+    showButtonPanel: true,
+    closeText: "Clear",
+    onClose: function () {
+      var event = arguments.callee.caller.caller.arguments[0];
+      if ($(event.delegateTarget).hasClass("ui-datepicker-close")) {
+        $(this).val("");
+      }
+    },
+  });
+
+  $(".approverrow").show();
+  if (
+    status == "Approved" ||
+    status == "Rejected" ||
+    $("#qualificationdata tr").length > 1
+  )
+    $(".commentslabel").html(
+      "<span class='mandatoryflag mandatoryComment'>*</span>"
+    );
+
+  $("#qualificationdata tr.active").hover(
+    function () {
+      $(this).addClass("qualificationRowHighlight");
+      $(this).removeClass("qualificationRowNotFocused");
+    },
+    function () {
+      $(this).addClass("qualificationRowNotFocused");
+      $(this).removeClass("qualificationRowHighlight");
+    }
+  );
+  statusActions();
+
+  if (isApprover) {
+    $(".approvalDate").each(function () {
+      if ($(this).val() == "")
+        $(this)
+          .datepicker({ dateFormat: "yyyy-mm-dd" })
+          .datepicker("setDate", new Date());
+    });
+
+    $(".expiryDate").each(function () {
+      if ($(this).val() == "")
+        $(this)
+          .datepicker({ dateFormat: "yyyy-mm-dd" })
+          .datepicker("setDate", "+3y");
+    });
+  }
+  toggleLoader(false);
+  totalQualificationItems = $("#qualificationdata tr .idBody").length;
+  var totalApprovedItems = $(
+    "#qualificationdata tr.qualificationApproved"
+  ).length;
+  totalItemsToUpdate = totalQualificationItems - totalApprovedItems;
+
+  if (isExpert) {
+    disableDatePicker();
+    disableAllObjectAndApprovedStandard();
+    totalItemsToUpdate = $(
+      "#qualificationdata tr.qualificationRowDisabled"
+    ).length;
+  } else if (isSupervisor && !isExpert && !isApprover) { // Bugfix done on 24.11.2022 to handle error when Approver is also the Supervisor. Added !isApprover to the last of the condition
+    triggerSupervisorAction();
+    disableQualificationControlsExceptExpiryDate();
+  } else if (isApprover && !isExpert) {
+    // && !isSiteAdmin)
+    disableQualificationControls();
+  } else if (isP04Member && !isExpert) {
+    DisableExpertControls();
+    disableQualificationControls();
+  }
+}
+
+function saveQualification() {
+  totalQualificationItems = $("#qualificationdata tr .idBody").length;
+
+  var totalApprovedItems = $(
+    "#qualificationdata tr.qualificationApproved"
+  ).length;
+
+  totalItemsToUpdate = totalQualificationItems - totalApprovedItems;
+
+  if (totalItemsToUpdate > 0 && totalItemsToUpdate > totalItemsToAppend)
+    totalItemsToUpdate = totalItemsToUpdate - totalItemsToAppend;
+
+  if (isSupervisor) {
+    totalItemsToUpdate = $(
+      "#qualificationdata tr.qualificationApproved"
+    ).length;
+  } else if (isExpert) {
+    totalItemsToUpdate = $(
+      "#qualificationdata tr.qualificationRowDisabled"
+    ).length;
+  }
+
+  //console.log($('#qualificationdata tr.readyToApprove').length);
+  //console.log(totalItemsToUpdate);
+  //if(totalItemsToUpdate != $('#qualificationdata tr.readyToApprove').length)
+  //console.log("Qualification to approve is not same.");
+  //totalItemsToUpdate = $('#qualificationdata tr.readyToApprove').length ;
+
+  $.each($("#qualificationdata tr"), function (index, tr) {
+    if (index > 0) {
+      if ($(tr).find(".idBody .checkboxContainer").html() == "" && isExpert) {
+        appendQualification($(tr));
+      }
+      if (
+        isExpert &&
+        $(tr).find(".idBody .checkboxContainer").html() != "" &&
+        $(tr).hasClass("qualificationRowDisabled")
+      ) {
+        updateQualification($(tr));
+        //console.log("updateQualificationCalled");
+      }
+      if (
+        isApprover &&
+        !isExpert &&
+        !$(tr).hasClass("qualificationRowDisabled")
+      ) {
+        updateQualification($(tr));
+      }
+      if (
+        isSupervisor &&
+        !isExpert &&
+        $(tr).hasClass("qualificationApproved")
+      ) {
+        updateQualification($(tr));
+      }
+    }
+  });
+  if (totalItemsToAppend == 0 && totalItemsToUpdate == 0) toggleLoader(false);
+}
+
+function appendQualification(tr) {
+  var properties = {};
+
+  //V1.2
+  properties.__metadata = {
+    type: "SP.Data." + qualificationListName + "ListItem",
+  };
+  properties.Title = $(tr).find(".titleBody .qualificationTitle").html();
+  properties.ExpertId = expertKey;
+  properties.Standard = $(tr)
+    .find(".standardBody .qualificationStandard")
+    .html();
+  properties.LevelObjectCategory = $(tr).find(".levelObject :selected").text();
+  properties.LevelStandard = $(tr).find(".levelStandard :selected").val();
+  properties.RequirementId = $(tr).find(".uniqueContainer")[0].innerText;
+  properties.SupervisorId = supervisorKey;
+  properties.ApproverId = approverKey;
+  properties.Status = $(".status :selected").text();
+
+  if ($(tr).find(".object .qualificationObjectGroup").length > 0) {
+    properties.ObjectGroup = {
+      __metadata: { type: "SP.Taxonomy.TaxonomyFieldValue" },
+      Label: $(tr).find(".object .qualificationObjectGroup").html(),
+      TermGuid: $(tr).find(".object .customIdContainer").html(),
+      WssId: -1,
+    };
+  }
+
+  if ($(tr).find(".object .qualificationActivityGroup").length > 0) {
+    properties.Activity = {
+      __metadata: { type: "SP.Taxonomy.TaxonomyFieldValue" },
+      Label: $(tr).find(".object .qualificationActivityGroup").html(),
+      TermGuid: $(tr).find(".object .customActivityIdContainer").html(),
+      WssId: -1,
+    };
+  }
+
+  /*   if ($(tr).find(".object .qualificationObjectGroup").length <= 0) {
+    properties = {
+      __metadata: { type: "SP.Data." + qualificationListName + "ListItem" },
+      Title: $(tr).find(".titleBody .qualificationTitle").html(),
+      ExpertId: expertKey,
+      Standard: $(tr).find(".standardBody .qualificationStandard").html(),
+      LevelObjectCategory: $(tr).find(".levelObject :selected").text(),
+      LevelStandard: $(tr).find(".levelStandard :selected").val(),
+      RequirementId: $(tr).find(".uniqueContainer")[0].innerText,
+      SupervisorId: supervisorKey,
+    };
+  } else {
+    properties = {
+      __metadata: { type: "SP.Data." + qualificationListName + "ListItem" },
+      Title: $(tr).find(".titleBody .qualificationTitle").html(),
+      ExpertId: expertKey,
+      Standard: $(tr).find(".standardBody .qualificationStandard").html(),
+      ObjectGroup: {
+        __metadata: { type: "SP.Taxonomy.TaxonomyFieldValue" },
+        Label: $(tr).find(".object .qualificationObjectGroup").html(),
+        TermGuid: $(tr).find(".object .customIdContainer").html(),
+        WssId: -1,
+      },
+      LevelObjectCategory: $(tr).find(".levelObject :selected").text(),
+      LevelStandard: $(tr).find(".levelStandard :selected").val(),
+      RequirementId: $(tr).find(".uniqueContainer")[0].innerText,
+      SupervisorId: supervisorKey,
+    };
+  } */
+  if ($(tr).find("input.approvalDate").val() != "")
+    properties.ApprovalDate = $(tr).find("input.approvalDate").val();
+  if ($(tr).find("input.expiryDate").val() != "")
+    properties.ExpiryDate = $(tr).find("input.expiryDate").val();
+
+  $.ajax({
+    url:
+      _spPageContextInfo.webAbsoluteUrl +
+      "/_api/web/lists/getbytitle('" +
+      qualificationListName +
+      "')/items",
+    type: "POST",
+    contentType: "application/json;odata=verbose",
+    data: JSON.stringify(properties),
+    headers: {
+      Accept: "application/json;odata=verbose",
+      "X-RequestDigest": $("#__REQUESTDIGEST").val(),
+    },
+    success: function (data) {
+      //console.log("Append qualification successfully.");
+      totalItemsAppended = totalItemsAppended + 1;
+    },
+    error: function (data) {
+      //console.log("Error in apending qualification: " + data.responseText);
+      totalItemsAppendFailed = totalItemsAppendFailed + 1;
+    },
+  });
+}
+
+function updateQualification(tr) {
+  var rowQualificationId = $(tr)
+    .find(".idBody .checkboxContainer")
+    .html()
+    .trim();
+  clientContext = new SP.ClientContext(_spPageContextInfo.webAbsoluteUrl);
+  var oList = clientContext
+    .get_web()
+    .get_lists()
+    .getByTitle(qualificationListName);
+  //console.log(rowQualificationId);
+
+  if (rowQualificationId != "") {
+    this.oListItem = oList.getItemById(rowQualificationId);
+    if (isExpert) {
+      oListItem.set_item(
+        "LevelObjectCategory",
+        $(tr).find(".levelObject :selected").text()
+      );
+      oListItem.set_item(
+        "LevelStandard",
+        $(tr).find(".levelStandard :selected").val()
+      );
+      var isDraftRow = $(tr).find(".idBody .checkboxContainer").closest(".stillInDraft");
+      if(isDraftRow.length > 0)
+      {
+             //Approver field update
+             if(approverKey !=0)
+             {
+                var assignedToVal = new SP.FieldUserValue();
+                assignedToVal.set_lookupId(approverKey);   //specify User Id 
+                oListItem.set_item("Approver", assignedToVal);
+             }
+             oListItem.set_item("Status",$(".status :selected").text());
+       }
+    }
+    if (isApprover) {
+      if (
+        $(tr).find("input.approvalDate").val() != "" &&
+        $(tr).hasClass("readyToApprove") &&
+        status == "Approved"
+      )
+        oListItem.set_item(
+          "ApprovalDate",
+          $(tr).find("input.approvalDate").val()
+        );
+      if (
+        $(tr).find("input.expiryDate").val() != "" &&
+        $(tr).hasClass("readyToApprove") &&
+        status == "Approved"
+      )
+    
+        oListItem.set_item("ExpiryDate", $(tr).find("input.expiryDate").val());
+
+        if ($(tr).hasClass("readyToApprove"))
+        {
+               oListItem.set_item("Status", $(".status :selected").text());
+         }
+	 
+    }
+    if (isSupervisor) {
+      if ($(tr).find("input.expiryDate").val() != "")
+        oListItem.set_item("ExpiryDate", $(tr).find("input.expiryDate").val());
+    }
+    
+    oListItem.set_item("IsActive",$(".isactive select").val());
+
+    oListItem.update();
+    clientContext.executeQueryAsync(
+      Function.createDelegate(this, this.onQualificationUpdated),
+      Function.createDelegate(this, this.onResetEffortForcastStatusFailed)
+    );
+  }
+}
+
+function onQualificationUpdated() {
+  //console.log('Qualification item updated successfully.');
+  totalItemsUpdated = totalItemsUpdated + 1;
+}
+
+function onResetEffortForcastStatusFailed(sender, args) {
+  console.log(
+    "Qualification item update Failed. " +
+      args.get_message() +
+      "\n" +
+      args.get_stackTrace()
+  );
+  totalItemsUpdateFailed = totalItemsUpdateFailed + 1;
+}
+
+function getCurrentUser() {
+  $.ajax({
+    url: _spPageContextInfo.webAbsoluteUrl + "/_api/web/CurrentUser",
+    type: "GET",
+    headers: {
+      Accept: "application/json; odata=verbose",
+      "X-RequestDigest": $("#__REQUESTDIGEST").val(),
+    },
+    dataType: "json",
+    async: true,
+    success: function (data) {
+      getCurrentUserGroupColl(data.d.Id);
+      currentUserId = data.d.Id;
+    },
+  });
+}
+
+function getCurrentUserGroupColl(UserID) {
+  $.ajax({
+    url:
+      _spPageContextInfo.webAbsoluteUrl +
+      "/_api/web/GetUserById(" +
+      UserID +
+      ")/Groups",
+    type: "GET",
+    headers: {
+      Accept: "application/json; odata=verbose",
+      "X-RequestDigest": $("#__REQUESTDIGEST").val(),
+    },
+    dataType: "json",
+    async: true,
+    success: function (data) {
+      /* get all group's title of current user. */
+      for (var i = 0; i < data.d.results.length; i++) {
+        if (data.d.results[i].Title == "Expert Approver") {
+          isExpertApproverMember = true;
+        }
+        if (data.d.results[i].Title == "Administrators") {
+          isSiteAdmin = true;
+        }
+        if (data.d.results[i].Title == "P04") {
+          isP04Member = true;
+        }
+      }
+      checkAuthorizedUser(UserID);
+    },
+  });
+}
+
+function checkAuthorizedUser(UserID) {
+  var expertPicker =
+    SPClientPeoplePicker.SPClientPeoplePickerDict[
+      $("div[title='Expert']").attr("id")
+    ];
+  if (!expertPicker.IsEmpty()) {
+    if (expertPicker.GetAllUserInfo()[0].IsResolved == true) {
+      var users = expertPicker.GetAllUserInfo();
+      expertKey = GetUserID(users[0].Key);
+      if (expertKey == UserID) isExpert = true;
+    }
+  }
+
+  var supervisorPicker =
+    SPClientPeoplePicker.SPClientPeoplePickerDict[
+      $("div[title='Supervisor']").attr("id")
+    ];
+  if (supervisorPicker != undefined && !supervisorPicker.IsEmpty()) {
+    if (supervisorPicker.GetAllUserInfo()[0].IsResolved == true) {
+      var users = supervisorPicker.GetAllUserInfo();
+      if (GetUserID(users[0].Key) == UserID) isSupervisor = true;
+    }
+  }
+
+  var regionalResourcePicker =
+    SPClientPeoplePicker.SPClientPeoplePickerDict[
+      $("div[title='Regional Resource Owner']").attr("id")
+    ];
+  if (
+    regionalResourcePicker != undefined &&
+    !regionalResourcePicker.IsEmpty()
+  ) {
+    if (regionalResourcePicker.GetAllUserInfo()[0].IsResolved == true) {
+      var users = regionalResourcePicker.GetAllUserInfo();
+      if (GetUserID(users[0].Key) == UserID) isRegionalResourceOwner = true;
+    }
+  }
+
+  var approverPicker =
+    SPClientPeoplePicker.SPClientPeoplePickerDict[
+      $("div[title='Approver']").attr("id")
+    ];
+  if (approverPicker != undefined && !approverPicker.IsEmpty()) {
+    if (approverPicker.GetAllUserInfo()[0].IsResolved == true) {
+      var users = approverPicker.GetAllUserInfo();
+      if (GetUserID(users[0].Key) == UserID) {
+        isApprover = true;
+      }
+    }
+  }
+
+  if (isApprover || isExpert || isSiteAdmin) isAuthorizedMember = true;
+
+  enableDisableIsActive();
+
+  ShowHideApproverComments();
+  $(".supervisorStatusMessage").hide();
+  $(".notSavingQualification").hide();
+  hideChangeStatusMessage();
+  $(".noActionNeededForApprover").hide();
+
+  if (isApprover && !isExpert && !isSiteAdmin) {
+    DisableExpertControls();
+    $(".ApproverHelperMessage").show();
+  }
+
+  if (isAuthorizedMember || isSupervisor) {
+    // && !isSiteAdmin)
+    getQualifications();
+    $(".card").show();
+    $(".noPermission").hide();
+  } else if (isP04Member) {
+    disableSave();
+    getQualifications();
+    $(".card").show();
+    $(".noPermission").hide();
+    $(".supervisorStatusMessage").hide();
+    $(".ApproverHelperMessage").hide();
+    hideChangeStatusMessage();
+    $(".notSavingQualification").hide();
+    toggleLoader(false);
+  } else {
+    $(".card").hide();
+    $(".noPermission").show();
+    toggleLoader(false);
+    disableSave();
+    $(".supervisorStatusMessage").hide();
+    $(".ApproverHelperMessage").hide();
+    hideChangeStatusMessage();
+    $(".notSavingQualification").hide();
+  }
+
+  $(".expert input").attr("readonly", "readonly");
+  $(".expert .sp-peoplepicker-delImage").remove();
+
+  $("span[data-displayname='Expert']").on("keydown", function (event) {
+    return false; //console.log(event.keyCode);  event.preventDefault(); event.stopPropagation();
+  });
+
+  if (isExpert) {
+    disableDatePicker();
+  }
+}
+
+function disableDatePicker() {
+  $(".approvalDate").datepicker("disable");
+  $(".expiryDate").datepicker("disable");
+}
+
+function hideEditButton() {
+ $(".editQualification").each(function () {
+        $(this).remove();
+    });
+}
+function cancel() {
+  window.location =
+    _spPageContextInfo.webAbsoluteUrl +
+    "/_layouts/15/start.aspx#/Lists/ExpertMaster";
+}
+
+function statusActions() {
+  var mandatoryflag = "<span class='mandatoryflag mandatoryComment'>*</span>";
+  $(".mandatoryComment").remove();
+  $(".notSavingQualification").hide();
+  hideChangeStatusMessage();
+
+  var status = $(".status :selected").text();
+  initialStatus = $(".status :selected").text();
+  if (status == null || status == "" || initialStatus == "") {
+    status = $(".status span[data-displayname='Status']").text().trim();
+    initialStatus = $(".status span[data-displayname='Status']").text().trim();
+  }
+  //console.log(status);
+  var statusContainer = $(".statusrow");
+
+  if (status == "Submitted for approval") {
+    $(statusContainer).addClass("readyStatus");
+    $(".approverrow").show();
+    if ($("#qualificationdata tr").length > 1)
+      $(".commentslabel").html(mandatoryflag);
+    //It is approver or expert, if status is submitted for approval do  not allow to save
+    disableSave();
+    disableAddQualification();
+    disableQualificationControls();
+  } else if (status == "Rejected") {
+    $(statusContainer).addClass("rejectedStatus");
+    ShowHideApproverComments();
+    if (isApprover && !isExpert) {
+      disableSave();
+      disableObjectAndStandard();
+    }
+    if (isExpert) {
+      showChangeStatusMessage();
+      disableSave();
+    }
+  } else if (status == "Approved") {
+    $(statusContainer).addClass("approvedStatus");
+    ShowHideApproverComments();
+    if (isApprover && !isExpert) disableSave();
+    if (isExpert) {
+      showChangeStatusMessage();
+      disableSave();
+    }
+    disableObjectAndStandard();
+  } else {
+    $(statusContainer).addClass("draftStatus");
+    $(".approverrow").hide();
+    if (isApprover && !isExpert) {
+      disableSave();
+      $(".noActionNeededForApprover").show();
+      $(".status select").attr("disabled", true);
+    }
+  }
+}
+
+function setStatusActions() {
+  //$(".approvercommentsrow").hide();
+  var mandatoryflag = "<span class='mandatoryflag mandatoryComment'>*</span>";
+  $(".mandatoryComment").remove();
+  enableSave();
+  enableAddQualification();
+  status = $(".status :selected").text();
+
+  if (status == null || status == "") {
+    status = $(".status span[data-displayname='Status']").text().trim();
+  }
+  //console.log(status);
+  var statusContainer = $(".statusrow");
+
+  if (status == "Submitted for approval") {
+    $(statusContainer).addClass("readyStatus");
+    $(".approverrow").show();
+    if ($("#qualificationdata tr").length > 1)
+      $(".commentslabel").html(mandatoryflag);
+    if (isExpert && initialStatus == "Submitted for approval") disableSave(); //disableAddQualification();
+    if (
+      !isExpert &&
+      (initialStatus == "Draft" || status == "Submitted for approval")
+    ) {
+      disableSave();
+      disableAddQualification();
+    }
+    hideChangeStatusMessage();
+    if (isApprover && !isExpert) disableSave();
+  } else if (status == "Rejected") {
+    $(statusContainer).addClass("rejectedStatus");
+    $(".approvercommentsrow textarea").val("");
+    ShowHideApproverComments();
+    if (isApprover && $("#qualificationdata tr .idBody").length == 0) {
+      disableSave();
+    }
+  } else if (status == "Approved") {
+    $(statusContainer).addClass("approvedStatus");
+    if (
+      $(".approvercommentsrow textarea").val() == "" ||
+      $(".approvercommentsrow textarea").val() == "Rejected"
+    )
+      $(".approvercommentsrow textarea").val("Approved");
+    ShowHideApproverComments();
+    if (isApprover && $("#qualificationdata tr .idBody").length == 0) {
+      disableSave();
+    }
+  } else {
+    $(statusContainer).addClass("draftStatus");
+    $(".approverrow").hide();
+    if (isExpert && initialStatus == "Submitted for approval")
+      disableAddQualification(); //disableSave();
+    hideChangeStatusMessage();
+    if (isApprover && !isExpert) disableSave();
+  }
+}
+
+function ShowHideApproverComments() {
+  if (!isApprover) {
+    $(".status option[value='Approved']").prop("disabled", true);
+    $(".status option[value='Rejected']").prop("disabled", true);
+    $(".ApproverHelperMessage").hide();
+    if (initialStatus == "Approved" || initialStatus == "Rejected") {
+      $(".approvercommentsrow").show();
+      $(".approvercommentsrow textarea").hide();
+    } else $(".approvercommentsrow").hide();
+  } else {
+    $(".status option[value='Draft']").prop("disabled", true);
+    $(".status option[value='Submitted for approval']").prop("disabled", true);
+    $(".approvercommentsrow").show();
+    var mandatoryflag = "<span class='mandatoryflag mandatoryComment'>*</span>";
+    $(".commentslabel").html(mandatoryflag);
+    $(".ApproverHelperMessage").hide();
+    if (initialStatus == "Approved" || initialStatus == "Rejected") {
+      $(".status select").attr("disabled", true);
+      $(".ApproverHelperMessage").html(NoFurtherActionMessage);
+      $(".ApproverHelperMessage").show();
+    }
+  }
+}
+
+function DisableExpertControls() {
+  $(".approverrow").show();
+  $(".approver input").attr("readonly", "readonly");
+  $(".approver .sp-peoplepicker-delImage").remove();
+  $("span[data-displayname='Approver']").on("keydown", function (event) {
+    return false;
+  });
+
+  $(".supervisor input").attr("readonly", "readonly");
+  $(".supervisor .sp-peoplepicker-delImage").remove();
+  $("span[data-displayname='Supervisor']").on("keydown", function (event) {
+    return false;
+  });
+
+  $(".regionalresourceowner input").attr("readonly", "readonly");
+  $(".regionalresourceowner .sp-peoplepicker-delImage").remove();
+  $("span[data-displayname='Regional Resource Owner']").on(
+    "keydown",
+    function (event) {
+      return false;
+    }
+  );
+
+  $("div[title='Region']").children().prop("contenteditable", false);
+  $(".region .ms-taxonomy-browser-button").remove();
+  $("div[title='Legal Entity']").children().prop("contenteditable", false);
+  $(".legalEntity .ms-taxonomy-browser-button").remove();
+  $("div[title='Special Skills']").children().prop("contenteditable", false);
+  $(".specialskills .ms-taxonomy-browser-button").remove();
+  $("div[title='Language']").children().prop("contenteditable", false);
+  $(".language .ms-taxonomy-browser-button").remove();
+
+  $(".documentation textarea").attr("readonly", "readonly");
+  $(".technicalcv textarea").attr("readonly", "readonly");
+  $(".remarks input").attr("readonly", "readonly");
+
+  $(".status option[value='Draft']").prop("disabled", true);
+  $(".status option[value='Submitted for approval']").prop("disabled", true);
+
+  $(".addNewRowCover").remove();
+}
+
+function disableQualificationControls() {
+  $(".levelStandard").attr("disabled", true);
+  $(".levelObject").attr("disabled", true);
+  $(".qualificationApproved .approvalDate").each(function () {
+    if ($(this).val() != "") $(this).datepicker("disable");
+  });
+  $(".qualificationApproved .expiryDate").each(function () {
+    if ($(this).val() != "") $(this).datepicker("disable");
+  });
+  $(".deleteQualification").each(function () {
+    $(this).remove();
+  });
+  $(".editQualification").each(function () {
+        $(this).remove();
+    });
+}
+
+function disableObjectAndStandard() {
+  $(".levelStandard").attr("disabled", true);
+  $(".levelObject").attr("disabled", true);
+}
+
+function disableAllObjectAndApprovedStandard() {
+  $(".qualificationApproved .levelStandard").attr("disabled", true);
+  $(".levelObject").attr("disabled", true);
+}
+
+function disableQualificationControlsExceptExpiryDate() {
+  $(".levelStandard").attr("disabled", true);
+  $(".levelObject").attr("disabled", true);
+  $(".approvalDate").each(function () {
+    if ($(this).val() != "") $(this).datepicker("disable");
+  });
+  $(".deleteQualification").each(function () {
+    $(this).remove();
+  });
+  $(".editQualification").each(function () {
+        $(this).remove();
+    });
+  $(".expiryDate").each(function () {
+    if ($(this).val() == "") $(this).datepicker("disable");
+  });
+}
+
+function disableSave() {
+  $(".footerButton .btn-success").each(function () {
+    if ($(this).val() == "Save") {
+      $(this).attr("disabled", "disabled");
+      $(this).attr("disabled", true);
+    }
+  });
+}
+
+function disableAddQualification() {
+  $(".addNewRowCover #newQualification").each(function () {
+    $(this).attr("disabled", "disabled");
+    $(this).attr("disabled", true);
+  });
+  $(".addNewRowCover").hide();
+  if (isExpert) {
+    $(".notSavingQualification").show();
+    $(".status option[value='Draft']").prop("disabled", true);
+    $(".status option[value='Submitted for approval']").prop("disabled", true);
+  }
+}
+
+function enableAddQualification() {
+  $(".addNewRowCover #newQualification").each(function () {
+    $(this).removeAttr("disabled");
+  });
+  $(".addNewRowCover").show();
+  $(".notSavingQualification").hide();
+  $(".status option[value='Draft']").removeAttr("disabled");
+  $(".status option[value='Submitted for approval']").removeAttr("disabled");
+}
+
+function showChangeStatusMessage() {
+  $(".changeStatusMessage").show();
+}
+
+function hideChangeStatusMessage() {
+  $(".changeStatusMessage").hide();
+}
+
+function enableSave() {
+  $(".footerButton .btn-success").each(function () {
+    if ($(this).val() == "Save") $(this).removeAttr("disabled");
+  });
+}
+
+function deleteRow(row) {
+  try {
+    var itemId = "";
+    itemId = $(row).closest("tr").find(".idBody .checkboxContainer").html();
+    if (itemId != "") {
+      clientContext = new SP.ClientContext(_spPageContextInfo.webAbsoluteUrl);
+      var oList = clientContext
+        .get_web()
+        .get_lists()
+        .getByTitle(qualificationListName);
+      this.oListItem = oList.getItemById(itemId);
+      oListItem.deleteObject();
+      clientContext.executeQueryAsync(
+        function () {
+          $(row).closest("tr").remove();
+          alert("Row deleted succussfully.");
+          if (totalItemsToUpdate > 0)
+            totalItemsToUpdate = totalItemsToUpdate - 1;
+        },
+        function (sender, args) {
+          console.log("error - message: " + args.get_message());
+        }
+      );
+    } else {
+      $(row).closest("tr").remove();
+      totalItemsToAppend = totalItemsToAppend - 1;
+    }
+  } catch (error) {
+    console.log("Could not delete row at server" + error);
+  }
+}
+
+function editRow(row) {
+         if (confirm('Please note that you are editing an already approved qualification. If you continue editing, the qualification will have to be again send for approval. Please confirm if you would like to procced ?')) {
+             try {
+        var itemId = "";
+        itemId = $(row).closest("tr").find(".idBody .checkboxContainer").html();
+        if (itemId != "") {
+        
+          var isApproverRow = $(row).closest("tr").find(".qualificationApproved");
+          if(isApproverRow != "")
+          {
+             $(row).closest("tr").removeClass("qualificationApproved").removeClass("qualificationRowDisabled").addClass("stillInDraft").addClass("qualificationRowDisabled");
+             var levelStandareField = 'select#levelStandard_'+ itemId;
+             $(levelStandareField ).removeAttr('disabled');
+          }  
+          $(row).closest("tr").find(".editQualification").remove();
+          $("#approverStatusIcon").closest("td").empty();
+          
+        }   
+ } catch (error) {
+        console.log("Could not edit row at server" + error);
+ }          } else {
+             return false;
+          }
+}
+
+//----------
+
+function saveExpert(toSaveQualification) {
+  try {
+    var itemId = getUrlVars()["ID"];
+    var itemType = getItemTypeForListName("ExpertMaster");
+    var tempComments = $(".approvercommentsrow textarea").val();
+    var tempStatus = $(".status :selected").val();
+    if (isApprover) {
+      if (tempStatus == "Approved" || tempStatus == "Rejected")
+        tempComments = "Status: " + tempStatus + ", Comments: " + tempComments;
+    }
+    var isActive = $(".isactive select").val();
+    var isActiveUntil = $(".activeuntil select").val();
+    
+    var properties = {
+      __metadata: { type: itemType },
+      Region: {
+        __metadata: { type: "SP.Taxonomy.TaxonomyFieldValue" },
+        Label: $('span.mdmdatacol[data-displayName="Region"]')
+          .find('input[type="hidden"]')
+          .val()
+          .split("|")[0],
+        TermGuid: $('span.mdmdatacol[data-displayName="Region"]')
+          .find('input[type="hidden"]')
+          .val()
+          .split("|")[1],
+        WssId: -1,
+      },
+      Legal_x0020_Entity: {
+        __metadata: { type: "SP.Taxonomy.TaxonomyFieldValue" },
+        Label: $('span.mdmdatacol[data-displayName="Legal Entity"]')
+          .find('input[type="hidden"]')
+          .val()
+          .split("|")[0],
+        TermGuid: $('span.mdmdatacol[data-displayName="Legal Entity"]')
+          .find('input[type="hidden"]')
+          .val()
+          .split("|")[1],
+        WssId: -1,
+      },
+      SupervisorId: supervisorKey,
+      RegionalResourceOwnerId: regionalOwnerKey,
+      ApproverId: approverKey,
+      Documentation: $(".documentation textarea").val(),
+      TechnicalCV: $(".technicalcv textarea").val(),
+      Remarks: $(".remarks input").val(),
+      Status: tempStatus,
+      ApproverComments: tempComments,
+      IsActive: isActive,
+      ActiveTill: isActiveUntil
+    };
+
+    if (
+      !isSupervisor &&
+      (tempStatus == "Approved" ||
+        tempStatus == "Rejected" ||
+        tempStatus == "Submitted for approval")
+    ) {
+      properties.SendNotification = true;
+    }
+
+    $.ajax({
+      url:
+        _spPageContextInfo.webAbsoluteUrl +
+        "/_api/web/lists/getbytitle('Expert Master')/items(" +
+        itemId +
+        ")",
+      type: "POST",
+      contentType: "application/json;odata=verbose",
+      data: JSON.stringify(properties),
+      headers: {
+        Accept: "application/json;odata=verbose",
+        "X-RequestDigest": $("#__REQUESTDIGEST").val(),
+        "content-Type": "application/json;odata=verbose",
+        "IF-MATCH": "*",
+        "X-HTTP-Method": "MERGE",
+      },
+      success: function (data) {
+        //console.log("Saved Expert Basic Details");
+        updateMultipleSelectionTaxonomies(itemId, toSaveQualification);
+        if (toSaveQualification == true) {
+          saveQualification();
+          if ((isApprover || isSupervisor) && !isExpert) monitorUpdate();
+          if (isExpert) {
+            monitorUpdate();
+            monitorAppend();
+          }
+          if (totalItemsToAppend == 0 && totalItemsToUpdate == 0) {
+            window.location.replace(
+              _spPageContextInfo.webAbsoluteUrl +
+                "/_layouts/15/start.aspx#/Lists/ExpertMaster"
+            );
+          }
+        }
+      },
+      error: function (data) {
+        console.log(data.responseText);
+        toggleLoader(false);
+      },
+    });
+  } catch (error) {
+    console.log("Error in saving Expert: " + error);
+    toggleLoader(false);
+  }
+}
+
+function getMultiSelectionMetadata(fieldName) {
+  var collectionResults = "";
+  var hiddenFieldValue = $(
+    'span.mdmdatacol[data-displayName="' + fieldName + '"]'
+  )
+    .find("input:hidden")
+    .val();
+  if (hiddenFieldValue != "") {
+    $.each(hiddenFieldValue.split(";"), function (index, value) {
+      collectionResults += "-1;#" + value + ";#";
+    });
+    collectionResults = collectionResults.substring(
+      0,
+      collectionResults.length - 2
+    );
+    return collectionResults;
+  } else {
+    return null;
+  }
+}
+
+function updateMultipleSelectionTaxonomies(ItemId, toSaveQualification) {
+  SP.SOD.executeOrDelayUntilScriptLoaded(function () {
+    "use strict";
+
+    var context = new SP.ClientContext(
+      _spPageContextInfo.siteAbsoluteUrl + "/Requirements"
+    );
+    var list = context.get_web().get_lists().getByTitle("Expert Master");
+    var item = list.getItemById(ItemId);
+    context.load(item);
+
+    var languageField = list.get_fields().getByInternalNameOrTitle("Language");
+    var taxLanguageField = context.castTo(
+      languageField,
+      SP.Taxonomy.TaxonomyField
+    );
+    context.load(taxLanguageField);
+
+    var specialSkillsField = list
+      .get_fields()
+      .getByInternalNameOrTitle("SpecialSkills");
+    var taxSpecialSkillsField = context.castTo(
+      specialSkillsField,
+      SP.Taxonomy.TaxonomyField
+    );
+    context.load(taxSpecialSkillsField);
+
+    context.executeQueryAsync(
+      function () {
+        //console.log('Retrieved language item and taxonomyfield : ' + item.get_id());
+        var termValueCollection = new SP.Taxonomy.TaxonomyFieldValueCollection(
+          context,
+          getMultiSelectionMetadata("Language"),
+          taxLanguageField
+        );
+        taxLanguageField.setFieldValueByValueCollection(
+          item,
+          termValueCollection
+        );
+
+        var termValueCollection = new SP.Taxonomy.TaxonomyFieldValueCollection(
+          context,
+          getMultiSelectionMetadata("Special Skills"),
+          taxSpecialSkillsField
+        );
+        taxSpecialSkillsField.setFieldValueByValueCollection(
+          item,
+          termValueCollection
+        );
+
+        item.update();
+        context.load(item);
+        context.executeQueryAsync(
+          function () {
+            //console.log('Saved Languages for Expert: ' + item.get_id());
+            isLanguageSaved = true;
+            isSpecialSkills = true;
+            if (toSaveQualification == false) {
+              window.location =
+                _spPageContextInfo.webAbsoluteUrl +
+                "/_layouts/15/start.aspx#/Lists/ExpertMaster";
+            }
+          },
+          function (sender, args) {
+            console.log("exception in updating item");
+          }
+        );
+      },
+      function (sender, args) {
+        console.log("Error while retrieving data from languages");
+      }
+    );
+  }, "SP.Taxonomy.js");
+}
+
+function getItemTypeForListName(name) {
+  return (
+    "SP.Data." +
+    name.charAt(0).toUpperCase() +
+    name.split(" ").join("").slice(1) +
+    "ListItem"
+  );
+}
+
+function getUrlVars() {
+  var vars = [],
+    hash;
+  var hashes = window.location.href
+    .slice(window.location.href.indexOf("?") + 1)
+    .split("&");
+  for (var i = 0; i < hashes.length; i++) {
+    hash = hashes[i].split("=");
+    vars.push(hash[0]);
+    vars[hash[0]] = hash[1];
+  }
+  return vars;
+}
+
+function monitorUpdate() {
+  setTimeout(function () {
+    if (totalItemsToUpdate > totalItemsUpdated + totalItemsUpdateFailed) {
+      //console.log("waiting for response");
+      monitorUpdate();
+    } else {
+      if (totalItemsToUpdate == totalItemsUpdated) {
+        //console.log("In " + totalItemsToUpdate + " items, " + totalItemsUpdated + " items successfully updated.");
+        //console.log("In " + totalItemsToUpdate + " items, " + totalItemsUpdated + " items successfully updated.");
+        window.location.replace(
+          _spPageContextInfo.webAbsoluteUrl +
+            "/_layouts/15/start.aspx#/Lists/ExpertMaster"
+        );
+      } else {
+        //console.log("Total items to update: " + totalItemsToUpdate + " , and total item updated: " + totalItemsUpdated);
+        //console.log("In " + totalItemsToUpdate + " items, " + totalItemsUpdateFailed + " items can not updated.");
+        toggleLoader(false);
+        $(".summaryErrMessage").show();
+        $(".summaryErrMessage").append(UnexpectedErrorMessage);
+        return false;
+      }
+    }
+  }, 1000);
+}
+
+function monitorAppend() {
+  setTimeout(function () {
+    if (
+      totalItemsToAppend > totalItemsAppended + totalItemsAppendFailed &&
+      !isLanguageSaved &&
+      !isSpecialSkills
+    ) {
+      //console.log("waiting for response");
+      monitorAppend();
+    } else if (
+      totalItemsToAppend == totalItemsAppended &&
+      !isLanguageSaved &&
+      !isSpecialSkills
+    ) {
+      //console.log("waiting for response");
+      monitorAppend();
+    } else {
+      if (totalItemsToAppend == totalItemsAppended) {
+        //console.log("Total items to update: " + totalItemsToAppend + " , and total item updated: " + totalItemsToAppend);
+        //console.log("In " + totalItemsToAppend + " items, " + totalItemsAppended + " items successfully processed.");
+        window.location.replace(
+          _spPageContextInfo.webAbsoluteUrl +
+            "/_layouts/15/start.aspx#/Lists/ExpertMaster"
+        );
+      } else {
+        //console.log("Total items to update: " + totalItemsToAppend + " , and total item updated: " + totalItemsToAppend);
+        //console.log("In " + totalItemsToAppend + " items, " + totalItemsAppendFailed + " items can not processed.");
+        toggleLoader(false);
+        $(".summaryErrMessage").show();
+        $(".summaryErrMessage").append(UnexpectedErrorMessage);
+        return false;
+      }
+    }
+  }, 1000);
+}
+
+function triggerSupervisorAction() {
+  $(".approvalDate").datepicker("disable");
+  DisableExpertControls();
+  $(".status select").attr("disabled", true);
+  $(".supervisorStatusMessage").html(SupervisorMessage);
+  $(".supervisorStatusMessage").show();
+  $(".ApproverHelperMessage").hide();
+  hideChangeStatusMessage();
+  $(".notSavingQualification").hide();
+  $(".ApproverHelperMessage").hide();
+  $(".card").show();
+  $(".noPermission").hide();
+  totalItemsToUpdate = $("#qualificationdata tr.qualificationApproved").length;
+  $(".approverrow").hide();
+  
+  if (initialStatus == "Submitted for approval" || status == "Submitted for approval") {
+    disableSave();
+    $(".notSavingQualification").show();
+    $(".supervisorStatusMessage").hide();
+  }
+}
+
+function triggerSupervisorActionNoQualification() {
+  DisableExpertControls();
+  $(".status select").attr("disabled", true);
+  $(".supervisorStatusMessage").hide();
+  $(".ApproverHelperMessage").hide();
+  hideChangeStatusMessage();
+  $(".notSavingQualification").hide();
+  $(".ApproverHelperMessage").hide();
+  $(".card").show();
+  $(".noPermission").hide();
+  $(".approverrow").hide();
+  disableSave();
+}
+
+function updateLevelObjectForObjectGroup(levelObject, objectGroup) {
+  $.each($("#qualificationdata tr"), function (index, tr) {
+    if (index > 0) {
+      if ($(tr).find(".object .customIdContainer").length > 0) {
+        if (
+          $(tr).find(".object .customIdContainer")[0].innerText ==
+            objectGroup &&
+          $(tr).find(".levelObject :selected").val() != levelObject
+        ) {
+          $(tr)
+            .find(".levelObject option[value='" + levelObject + "']")
+            .attr("selected", "selected");
+          //$(tr).find(".levelObject select").val(levelObject).change();
+          console.log(levelObject);
+        }
+      }
+    }
+
+    //V1.2
+    if ($(tr).find(".object .customActivityIdContainer").length > 0) {
+      if (
+        $(tr).find(".object .customActivityIdContainer")[0].innerText ==
+          objectGroup &&
+        $(tr).find(".levelObject :selected").val() != levelObject
+      ) {
+        $(tr)
+          .find(".levelObject option[value='" + levelObject + "']")
+          .attr("selected", "selected");
+        //$(tr).find(".levelObject select").val(levelObject).change();
+        console.log(levelObject);
+      }
+    }
+  });
+}
